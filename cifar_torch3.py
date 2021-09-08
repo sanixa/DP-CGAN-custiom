@@ -25,6 +25,7 @@ from opacus import PrivacyEngine
 from opacus.utils.module_modification import convert_batchnorm_modules
 from opacus.utils.uniform_sampler import UniformWithReplacementSampler
 
+
 from torchsummary import summary
 from tqdm import tqdm
 def same_seeds(seed):
@@ -41,86 +42,237 @@ def same_seeds(seed):
     torch.backends.cudnn.deterministic = True
 
 same_seeds(0)
-def weights_init(m):
-    classname = m.__class__.__name__
-    if classname.find('Conv') != -1:
-        m.weight.data.normal_(0.0, 0.02)
-    elif classname.find('BatchNorm') != -1:
-        m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
 
-class Flatten(nn.Module):
-    def forward(self, input):
-        return input.view(input.size()[0], -1)
 
-class Unflatten(nn.Module):
-    def forward(self, input):
-        return input.view(input.size()[0], 1, 28, 28)
+def one_hot_embedding(y, num_classes=10, dtype=torch.cuda.FloatTensor):
+    '''
+    apply one hot encoding on labels
+    :param y: class label
+    :param num_classes: number of classes
+    :param dtype: data type
+    :return:
+    '''
+    scatter_dim = len(y.size())
+    y_tensor = y.type(torch.cuda.LongTensor).view(*y.size(), -1)
+    zeros = torch.zeros(*y.size(), num_classes).type(dtype)
+    return zeros.scatter(scatter_dim, y_tensor, 1)
 
-class Unflatten_7(nn.Module):
-    def forward(self, input):
-        return input.view(input.size()[0], -1, 7, 7)
-        
-class Discriminator(nn.Module):
-    def __init__(self):
-        super(Discriminator, self).__init__()
 
-        self.label_emb = nn.Sequential(
-            nn.Embedding(10, 50),
-            nn.Linear(50, 784),
-            Unflatten(),
-        )
+def pixel_norm(x, eps=1e-10):
+    '''
+    Pixel normalization
+    :param x:
+    :param eps:
+    :return:
+    '''
+    return x * torch.rsqrt(torch.mean(torch.pow(x, 2), dim=1, keepdim=True) + eps)
 
-        self.model = nn.Sequential(
-            nn.Conv2d(2, 128, 3, 2, 1), #[128, 14, 14]
-            nn.LeakyReLU(),
 
-            nn.Conv2d(128, 128, 3, 2, 1), #[128, 7, 7]
-            nn.LeakyReLU(),
+def l2_norm(v, eps=1e-10):
+    '''
+    L2 normalization
+    :param v:
+    :param eps:
+    :return:
+    '''
+    return v / (v.norm() + eps)
 
-            Flatten(),
+class SpectralNorm(nn.Module):
+    '''
+    Spectral Normalization
+    '''
 
-            nn.Dropout(0.4),
-            nn.Linear(7*7*128, 1),
-            nn.Sigmoid(),
-        )
-        self.apply(weights_init)
+    def __init__(self, module, name='weight', power_iterations=1):
+        super(SpectralNorm, self).__init__()
+        self.module = module
+        self.name = name
+        self.power_iterations = power_iterations
+        if not self._made_params():
+            self._make_params()
 
-    def forward(self, imgs, labels):
-        labels = self.label_emb(labels)
-        data = torch.cat((imgs, labels), axis=1)
-        return self.model(data)
+    def _update_u_v(self):
+        u = getattr(self.module, self.name + "_u")
+        v = getattr(self.module, self.name + "_v")
+        w = getattr(self.module, self.name + "_bar")
 
-class Generator(nn.Module):
-    def __init__(self):
-        super(Generator, self).__init__()
+        height = w.data.shape[0]
+        for _ in range(self.power_iterations):
+            v.data = l2_norm(torch.mv(torch.t(w.view(height, -1).data), u.data))
+            u.data = l2_norm(torch.mv(w.view(height, -1).data, v.data))
 
-        self.label_emb = nn.Sequential(
-            nn.Embedding(10, 50),
-            nn.Linear(50, 49),
-            Unflatten_7(),
-        )
+        sigma = u.dot(w.view(height, -1).mv(v))
+        setattr(self.module, self.name, w / sigma.expand_as(w))
+        del u, v, w
 
-        self.linear = nn.Sequential(
-            nn.Linear(100, 7*7*128),
-            nn.LeakyReLU(),
-            Unflatten_7(),
-        )
+    def _made_params(self):
+        try:
+            u = getattr(self.module, self.name + "_u")
+            v = getattr(self.module, self.name + "_v")
+            w = getattr(self.module, self.name + "_bar")
+            return True
+        except AttributeError:
+            return False
 
-        self.model = nn.Sequential(
-            nn.ConvTranspose2d(129, 128, 4, 2, 1), #[128, 14, 14]
-            nn.LeakyReLU(),
-            nn.ConvTranspose2d(128, 128, 4, 2, 1), #[128, 28, 28]
-            nn.LeakyReLU(),
-            nn.Conv2d(128, 1, 7, 1, 3),
-            nn.Tanh(),
-        )
-        self.apply(weights_init)
+    def _make_params(self):
+        w = getattr(self.module, self.name)
 
-    def forward(self, z, labels):
-        labels, linear = self.label_emb(labels), self.linear(z)
-        data = torch.cat((linear, labels), axis=1)
-        return self.model(data)
+        height = w.data.shape[0]
+        width = w.view(height, -1).data.shape[1]
+
+        u = nn.Parameter(w.data.new(height).normal_(0, 1), requires_grad=False)
+        v = nn.Parameter(w.data.new(width).normal_(0, 1), requires_grad=False)
+        u.data = l2_norm(u.data)
+        v.data = l2_norm(v.data)
+        w_bar = nn.Parameter(w.data)
+
+        del self.module._parameters[self.name]
+
+        self.module.register_parameter(self.name + "_u", u)
+        self.module.register_parameter(self.name + "_v", v)
+        self.module.register_parameter(self.name + "_bar", w_bar)
+
+    def forward(self, *args):
+        self._update_u_v()
+        return self.module.forward(*args)
+
+
+#@torchsnooper.snoop()
+class GeneratorDCGAN_cifar(nn.Module):
+    def __init__(self, z_dim=10, model_dim=64, num_classes=10, outact=nn.Tanh()):
+        super(GeneratorDCGAN_cifar, self).__init__()
+
+        self.cdist = nn.CosineSimilarity(dim = 1, eps= 1e-9)
+        self.grads = []
+        self.grad_dict = {}
+
+        self.model_dim = model_dim
+        self.z_dim = z_dim
+        self.num_classes = num_classes
+
+        fc = nn.Linear(z_dim + num_classes, z_dim * 1 * 1)
+        deconv1 = nn.ConvTranspose2d(z_dim, model_dim * 4, 4, 1, 0, bias=False)
+        deconv2 = nn.ConvTranspose2d(model_dim * 4, model_dim * 2, 4, 2, 1, bias=False)
+        deconv3 = nn.ConvTranspose2d(model_dim * 2, model_dim, 4, 2, 1, bias=False)
+        deconv4 = nn.ConvTranspose2d(model_dim, 1, 4, 2, 1, bias=False)
+
+        self.deconv1 = deconv1
+        self.deconv2 = deconv2
+        self.deconv3 = deconv3
+        self.deconv4 = deconv4
+        self.BN_1 = nn.BatchNorm2d(model_dim * 4)
+        self.BN_2 = nn.BatchNorm2d(model_dim * 2)
+        self.BN_3 = nn.BatchNorm2d(model_dim)
+        self.fc = fc
+        self.relu = nn.ReLU()
+        self.outact = outact
+
+        ''' reference by https://github.com/Ksuryateja/DCGAN-CIFAR10-pytorch/blob/master/gan_cifar.py
+        nn.ConvTranspose2d(z_dim, model_dim * 8, 4, 1, 0, bias=False),
+        nn.BatchNorm2d(model_dim * 8),
+        nn.ReLU(True),
+        # state size. (ngf*8) x 4 x 4
+        nn.ConvTranspose2d(model_dim * 8, model_dim * 4, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(model_dim * 4),
+        nn.ReLU(True),
+        # state size. (ngf*4) x 8 x 8
+        nn.ConvTranspose2d(model_dim * 4, model_dim * 2, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(model_dim * 2),
+        nn.ReLU(True),
+        # state size. (ngf*2) x 16 x 16
+        nn.ConvTranspose2d(model_dim * 2, model_dim, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(model_dim),
+        nn.ReLU(True),
+        # state size. (ngf) x 32 x 32
+        nn.ConvTranspose2d(model_dim, nc, 4, 2, 1, bias=False),
+        nn.Tanh()
+        # state size. (nc) x 64 x 64
+        '''
+
+    def forward(self, z, y):
+        y_onehot = one_hot_embedding(y, self.num_classes)
+        z_in = torch.cat([z, y_onehot], dim=1)
+        output = self.fc(z_in)
+        output = output.view(-1, self.z_dim, 1, 1)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv1(output)
+        output = self.BN_1(output)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv2(output)
+        output = self.BN_2(output)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv3(output)
+        output = self.BN_3(output)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv4(output)
+        output = self.outact(output)
+
+        return output.view(-1, 32 * 32)
+
+#@torchsnooper.snoop()
+class DiscriminatorDCGAN_cifar(nn.Module):
+    def __init__(self, model_dim=64, num_classes=10, if_SN=True):
+        super(DiscriminatorDCGAN_cifar, self).__init__()
+
+        self.model_dim = model_dim
+        self.num_classes = num_classes
+
+        if if_SN:
+            self.conv1 = SpectralNorm(nn.Conv2d(1, model_dim, 4, 2, 1, bias=False))
+            self.conv2 = SpectralNorm(nn.Conv2d(model_dim, model_dim * 2, 4, 2, 1, bias=False))
+            self.conv3 = SpectralNorm(nn.Conv2d(model_dim * 2, model_dim * 4, 4, 2, 1, bias=False))
+            self.conv4 = SpectralNorm(nn.Conv2d(model_dim * 4, 1, 4, 1, 0, bias=False))
+            self.BN_1 = nn.BatchNorm2d(model_dim * 2)
+            self.BN_2 = nn.BatchNorm2d(model_dim * 4)
+            self.linear = SpectralNorm(nn.Linear(4 * 4 * 4 * model_dim, 1))
+            self.linear_y = SpectralNorm(nn.Embedding(num_classes, 4 * 4 * 4 * model_dim))
+        else:
+            self.conv1 = nn.Conv2d(1, model_dim, 5, stride=2, padding=2)
+            self.conv2 = nn.Conv2d(model_dim, model_dim * 2, 5, stride=2, padding=2)
+            self.conv3 = nn.Conv2d(model_dim * 2, model_dim * 4, 5, stride=2, padding=2)
+            self.linear = nn.Linear(4 * 4 * 4 * model_dim, 1)
+            self.linear_y = nn.Embedding(num_classes, 4 * 4 * 4 * model_dim)
+        self.LeakyReLU = nn.LeakyReLU(0.2, inplace=True)
+        self.Sigmoid = nn.Sigmoid()
+
+        ''' reference by https://github.com/Ksuryateja/DCGAN-CIFAR10-pytorch/blob/master/gan_cifar.py
+            # input is (nc) x 64 x 64
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf) x 32 x 32
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*2) x 16 x 16
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*4) x 8 x 8
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            # state size. (ndf*8) x 4 x 4
+            nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
+            nn.Sigmoid()
+        '''
+
+    def forward(self, input, y):
+        input = input.view(-1, 1, 32, 32)
+        h = self.LeakyReLU(self.conv1(input))
+        h = self.LeakyReLU(self.BN_1(self.conv2(h)))
+        h = self.LeakyReLU(self.BN_2(self.conv3(h)))
+        #h = self.Sigmoid(self.conv4(h))
+        h = h.view(-1, 4 * 4 * 4 * self.model_dim)
+        out = self.linear(h)
+        out += torch.sum(self.linear_y(y) * h, dim=1, keepdim=True)
+        return out.view(-1, 1).squeeze(1)
 
 
 FloatTensor = torch.cuda.FloatTensor
@@ -187,11 +339,14 @@ try:
         )
 
         if (args.noise > 0):
-            G = Generator().cuda()
+            G = GeneratorDCGAN_cifar(z_dim=args.g_dim).cuda()
             G.train()
 
-            D = Discriminator().cuda()
+            D = DiscriminatorDCGAN_cifar().cuda()
             D.train()
+
+            G = convert_batchnorm_modules(G)
+            D = convert_batchnorm_modules(D)
 
             optimizerD = optim.Adam(D.parameters(), lr=args.lr, betas=(0.5, 0.999))
             optimizerG = optim.Adam(G.parameters(), lr=args.lr, betas=(0.5, 0.999))

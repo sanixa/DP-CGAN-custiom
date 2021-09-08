@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 
 from torch.utils.data import DataLoader, Dataset, TensorDataset
+from opacus.utils.module_modification import convert_batchnorm_modules
 
 from torchvision import transforms
 from torchvision.datasets import CIFAR10, MNIST
@@ -47,6 +48,85 @@ class Generator(nn.Module):
         data = torch.cat((linear, labels), axis=1)
         return self.model(data)
 
+class GeneratorDCGAN_cifar(nn.Module):
+    def __init__(self, z_dim=10, model_dim=64, num_classes=10, outact=nn.Tanh()):
+        super(GeneratorDCGAN_cifar, self).__init__()
+
+        self.cdist = nn.CosineSimilarity(dim = 1, eps= 1e-9)
+        self.grads = []
+        self.grad_dict = {}
+
+        self.model_dim = model_dim
+        self.z_dim = z_dim
+        self.num_classes = num_classes
+
+        fc = nn.Linear(z_dim + num_classes, z_dim * 1 * 1)
+        deconv1 = nn.ConvTranspose2d(z_dim, model_dim * 4, 4, 1, 0, bias=False)
+        deconv2 = nn.ConvTranspose2d(model_dim * 4, model_dim * 2, 4, 2, 1, bias=False)
+        deconv3 = nn.ConvTranspose2d(model_dim * 2, model_dim, 4, 2, 1, bias=False)
+        deconv4 = nn.ConvTranspose2d(model_dim, 1, 4, 2, 1, bias=False)
+
+        self.deconv1 = deconv1
+        self.deconv2 = deconv2
+        self.deconv3 = deconv3
+        self.deconv4 = deconv4
+        self.BN_1 = nn.BatchNorm2d(model_dim * 4)
+        self.BN_2 = nn.BatchNorm2d(model_dim * 2)
+        self.BN_3 = nn.BatchNorm2d(model_dim)
+        self.fc = fc
+        self.relu = nn.ReLU()
+        self.outact = outact
+
+        ''' reference by https://github.com/Ksuryateja/DCGAN-CIFAR10-pytorch/blob/master/gan_cifar.py
+        nn.ConvTranspose2d(z_dim, model_dim * 8, 4, 1, 0, bias=False),
+        nn.BatchNorm2d(model_dim * 8),
+        nn.ReLU(True),
+        # state size. (ngf*8) x 4 x 4
+        nn.ConvTranspose2d(model_dim * 8, model_dim * 4, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(model_dim * 4),
+        nn.ReLU(True),
+        # state size. (ngf*4) x 8 x 8
+        nn.ConvTranspose2d(model_dim * 4, model_dim * 2, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(model_dim * 2),
+        nn.ReLU(True),
+        # state size. (ngf*2) x 16 x 16
+        nn.ConvTranspose2d(model_dim * 2, model_dim, 4, 2, 1, bias=False),
+        nn.BatchNorm2d(model_dim),
+        nn.ReLU(True),
+        # state size. (ngf) x 32 x 32
+        nn.ConvTranspose2d(model_dim, nc, 4, 2, 1, bias=False),
+        nn.Tanh()
+        # state size. (nc) x 64 x 64
+        '''
+
+    def forward(self, z, y):
+        y_onehot = one_hot_embedding(y, self.num_classes)
+        z_in = torch.cat([z, y_onehot], dim=1)
+        output = self.fc(z_in)
+        output = output.view(-1, self.z_dim, 1, 1)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv1(output)
+        output = self.BN_1(output)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv2(output)
+        output = self.BN_2(output)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv3(output)
+        output = self.BN_3(output)
+        output = self.relu(output)
+        output = pixel_norm(output)
+
+        output = self.deconv4(output)
+        output = self.outact(output)
+
+        return output.view(-1, 32 * 32)
+
 FloatTensor = torch.cuda.FloatTensor
 LongTensor = torch.cuda.LongTensor
 
@@ -68,7 +148,11 @@ if __name__ == '__main__':
 		sys.exit("model does not exist")
 
 	print('loading model...')
-	netG = Generator().cuda()
+	if args.dataset == 'mnist':
+		netG = Generator().cuda()
+	elif args.dataset == 'cifar_10':
+		netG = GeneratorDCGAN_cifar(z_dim=args.g_dim).cuda()
+		netG = convert_batchnorm_modules(netG)
 	netG.load_state_dict(torch.load(args.model_path))
 
 	print(f"save dir:{args.save_dir}")
@@ -119,7 +203,6 @@ if __name__ == '__main__':
 		test_set = MNIST(root="MNIST", download=True, train=False, transform=transform)
 	elif args.dataset == 'cifar_10':
 		transform = transforms.Compose([
-						transforms.CenterCrop(28),
 						transforms.Grayscale(1),
 						transforms.ToTensor()])
 		train_set = CIFAR10(root="CIFAR10", download=True, train=True, transform=transform)
