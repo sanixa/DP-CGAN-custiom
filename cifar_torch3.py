@@ -339,14 +339,14 @@ try:
         )
 
         if (args.noise > 0):
-            G = GeneratorDCGAN_cifar(z_dim=args.g_dim).cuda()
+            G = GeneratorDCGAN_cifar(z_dim=args.g_dim)
             G.train()
 
-            D = DiscriminatorDCGAN_cifar().cuda()
+            D = DiscriminatorDCGAN_cifar()
             D.train()
 
-            G = convert_batchnorm_modules(G)
-            D = convert_batchnorm_modules(D)
+            G = convert_batchnorm_modules(G).cuda()
+            D = convert_batchnorm_modules(D).cuda()
 
             optimizerD = optim.Adam(D.parameters(), lr=args.lr, betas=(0.5, 0.999))
             optimizerG = optim.Adam(G.parameters(), lr=args.lr, betas=(0.5, 0.999))
