@@ -60,7 +60,7 @@ class Unflatten(nn.Module):
 class Unflatten_7(nn.Module):
     def forward(self, input):
         return input.view(input.size()[0], -1, 7, 7)
-        
+
 class Discriminator(nn.Module):
     def __init__(self):
         super(Discriminator, self).__init__()
@@ -92,9 +92,10 @@ class Discriminator(nn.Module):
         return self.model(data)
 
 class Generator(nn.Module):
-    def __init__(self):
+    def __init__(self, z_dim):
         super(Generator, self).__init__()
-
+        self.z_dim = z_dim
+        
         self.label_emb = nn.Sequential(
             nn.Embedding(10, 50),
             nn.Linear(50, 49),
@@ -102,7 +103,7 @@ class Generator(nn.Module):
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(100, 7*7*128),
+            nn.Linear(self.z_dim, 7*7*128),
             nn.LeakyReLU(),
             Unflatten_7(),
         )
@@ -185,7 +186,7 @@ try:
         )
 
         if (args.noise >= 0):
-            G = Generator().cuda()
+            G = Generator(args.g_dim).cuda()
             G.train()
 
             D = Discriminator().cuda()
@@ -203,7 +204,7 @@ try:
             )
             privacy_engine.attach(optimizerD)
 
-
+            '''
             def compute_epsilon(steps,nm):
                 orders = [1 + x / 10. for x in range(1, 100)] + list(range(12, 64))
                 sampling_probability = args.batch/len(train_set)
@@ -216,6 +217,7 @@ try:
 
             eps = compute_epsilon(args.iter,args.noise)
             print(eps)
+            '''
 
             criterion = nn.BCELoss()
             bar = tqdm(range(args.iter+1))
@@ -266,7 +268,7 @@ try:
                 
                 if((iteration+1) %args.iter == 0):
                     break
-        
+
 except:
     raise
 

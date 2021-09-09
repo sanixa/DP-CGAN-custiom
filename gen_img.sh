@@ -1,44 +1,41 @@
-for i in {1..4}
-do
-	python img_gen.py --model-path checkpoint/eps_1/DPCGAN_MNIST_eps1.1_acc0.${i}.ckpt --save-dir data/eps_1/diff_acc/${i}0
-done
+# +
 
-for i in {1..5}
-do
-	python img_gen.py --model-path checkpoint/eps_10/DPCGAN_MNIST_eps10.0_acc0.${i}.ckpt --save-dir data/eps_10/diff_acc/${i}0
-done
+if [[ "$1" == "cifar" ]]
+then
 
-for i in {1..6}
-do
-	python img_gen.py --model-path checkpoint/eps_100/DPCGAN_MNIST_eps100.3_acc0.${i}.ckpt --save-dir data/eps_100/diff_acc/${i}0
-done
+	for i in 1 10 100 1000 inf
+	do
+		for (( j=1000; j<=20000; j=j+1000 ))
+		do
+			python img_gen.py --dataset cifar_10 --g_dim 100 --model-path checkpoint_cifar/eps_${i}_z100/iteration${j}.ckpt --save-dir data_cifar/eps_${i}/diff_iter/${j}
+		done
+	done
+    
+	for i in 01 02 001 
+	do
+		for (( j=1000; j<=20000; j=j+1000 ))
+		do
+			python img_gen.py --dataset cifar_10 --g_dim 100 --model-path checkpoint_cifar/n_${i}_z100/iteration${j}.ckpt --save-dir data_cifar/n_${i}/diff_iter/${j}
+		done
+	done
+# -
 
-for i in {1..8}
-do 
-	python img_gen.py --model-path checkpoint/eps_1000/DPCGAN_MNIST_eps1000.8_acc0.${i}.ckpt --save-dir data/eps_1000/diff_acc/${i}0
-done
+else
 
-for i in {1..8}
-do 
-	python img_gen.py --model-path checkpoint/eps_inf/DPCGAN_MNIST_eps_inf_acc0.${i}.ckpt --save-dir data/eps_inf/diff_acc/${i}0
-done
 
-for i in 1000 5000 10000 20000
-do
-	python img_gen.py --model-path checkpoint/eps_1/DPCGAN_MNIST_eps1.1_iteration${i}.ckpt --save-dir data/eps_1/diff_iter/${i}
-done
+	for i in 1 10 100 1000 inf
+	do
+		for (( j=1000; j<=20000; j=j+1000 ))
+		do
+			python img_gen.py --g_dim 32 --dataset mnist --model-path checkpoint/eps_${i}_z32/iteration${j}.ckpt --save-dir data/eps_${i}/diff_iter/${j}
+		done
+	done
+fi
 
-for i in 1000 5000 10000 20000
-do
-	python img_gen.py --model-path checkpoint/eps_10/DPCGAN_MNIST_eps10.0_iteration${i}.ckpt --save-dir data/eps_10/diff_iter/${i}
-done
-
-for i in 1000 5000 10000 20000
-do
-	python img_gen.py --model-path checkpoint/eps_100/DPCGAN_MNIST_eps100.3_iteration${i}.ckpt --save-dir data/eps_100/diff_iter/${i}
-done
-
-for i in 1000 5000 10000 20000
-do
-	python img_gen.py --model-path checkpoint/eps_1000/DPCGAN_MNIST_eps1000.8_iteration${i}.ckpt --save-dir data/eps_1000/diff_iter/${i}
-done
+	for i in 01 02 001
+	do
+		for (( j=1000; j<=20000; j=j+1000 ))
+		do
+			python img_gen.py --g_dim 32 --dataset mnist --model-path checkpoint/n_${i}_z32/iteration${j}.ckpt --save-dir data/n_${i}/diff_iter/${j}
+		done
+	done

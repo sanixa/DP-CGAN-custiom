@@ -19,8 +19,9 @@ class Unflatten_7(nn.Module):
         return input.view(input.size()[0], -1, 7, 7)
 
 class Generator(nn.Module):
-    def __init__(self):
+    def __init__(self, z_dim):
         super(Generator, self).__init__()
+        self.z_dim = z_dim
 
         self.label_emb = nn.Sequential(
             nn.Embedding(10, 50),
@@ -29,7 +30,7 @@ class Generator(nn.Module):
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(100, 7*7*128),
+            nn.Linear(self.z_dim, 7*7*128),
             nn.LeakyReLU(),
             Unflatten_7(),
         )
@@ -149,15 +150,15 @@ if __name__ == '__main__':
 
 	print('loading model...')
 	if args.dataset == 'mnist':
-		netG = Generator().cuda()
+		netG = Generator(args.g_dim).cuda()
 	elif args.dataset == 'cifar_10':
-		netG = GeneratorDCGAN_cifar(z_dim=args.g_dim).cuda()
-		netG = convert_batchnorm_modules(netG)
+		netG = GeneratorDCGAN_cifar(z_dim=args.g_dim)
+		netG = convert_batchnorm_modules(netG).cuda()
 	netG.load_state_dict(torch.load(args.model_path))
 
 	print(f"save dir:{args.save_dir}")
 	if not os.path.isdir(args.save_dir):
-		os.mkdir(args.save_dir)
+		os.makedirs(args.save_dir)
 
 	for i in tqdm(range(1, 6)):
 		noise = Variable(FloatTensor(np.random.normal(0, 1, (2000, args.g_dim))).cuda())

@@ -1,3 +1,4 @@
+
 import sys, os
 sys.path.append('../pyvacy')
 
@@ -218,7 +219,7 @@ class GeneratorDCGAN_cifar(nn.Module):
 
 #@torchsnooper.snoop()
 class DiscriminatorDCGAN_cifar(nn.Module):
-    def __init__(self, model_dim=64, num_classes=10, if_SN=True):
+    def __init__(self, model_dim=64, num_classes=10, if_SN=False):
         super(DiscriminatorDCGAN_cifar, self).__init__()
 
         self.model_dim = model_dim
@@ -228,15 +229,18 @@ class DiscriminatorDCGAN_cifar(nn.Module):
             self.conv1 = SpectralNorm(nn.Conv2d(1, model_dim, 4, 2, 1, bias=False))
             self.conv2 = SpectralNorm(nn.Conv2d(model_dim, model_dim * 2, 4, 2, 1, bias=False))
             self.conv3 = SpectralNorm(nn.Conv2d(model_dim * 2, model_dim * 4, 4, 2, 1, bias=False))
-            self.conv4 = SpectralNorm(nn.Conv2d(model_dim * 4, 1, 4, 1, 0, bias=False))
+            #self.conv4 = SpectralNorm(nn.Conv2d(model_dim * 4, 1, 4, 1, 0, bias=False))
             self.BN_1 = nn.BatchNorm2d(model_dim * 2)
             self.BN_2 = nn.BatchNorm2d(model_dim * 4)
             self.linear = SpectralNorm(nn.Linear(4 * 4 * 4 * model_dim, 1))
             self.linear_y = SpectralNorm(nn.Embedding(num_classes, 4 * 4 * 4 * model_dim))
         else:
-            self.conv1 = nn.Conv2d(1, model_dim, 5, stride=2, padding=2)
-            self.conv2 = nn.Conv2d(model_dim, model_dim * 2, 5, stride=2, padding=2)
-            self.conv3 = nn.Conv2d(model_dim * 2, model_dim * 4, 5, stride=2, padding=2)
+            self.conv1 = nn.Conv2d(1, model_dim, 4, 2, 1, bias=False)
+            self.conv2 = nn.Conv2d(model_dim, model_dim * 2, 4, 2, 1, bias=False)
+            self.conv3 = nn.Conv2d(model_dim * 2, model_dim * 4, 4, 2, 1, bias=False)
+            #self.conv4 = nn.Conv2d(model_dim * 4, 1, 4, 1, 0, bias=False)
+            self.BN_1 = nn.BatchNorm2d(model_dim * 2)
+            self.BN_2 = nn.BatchNorm2d(model_dim * 4)
             self.linear = nn.Linear(4 * 4 * 4 * model_dim, 1)
             self.linear_y = nn.Embedding(num_classes, 4 * 4 * 4 * model_dim)
         self.LeakyReLU = nn.LeakyReLU(0.2, inplace=True)
@@ -272,7 +276,8 @@ class DiscriminatorDCGAN_cifar(nn.Module):
         h = h.view(-1, 4 * 4 * 4 * self.model_dim)
         out = self.linear(h)
         out += torch.sum(self.linear_y(y) * h, dim=1, keepdim=True)
-        return out.view(-1, 1).squeeze(1)
+        out = self.Sigmoid(out)
+        return out
 
 
 FloatTensor = torch.cuda.FloatTensor
@@ -316,7 +321,7 @@ try:
         parser.add_argument('--class_epoch', type=int, default=20)
         parser.add_argument('--g_dim', type=int, default=100)
         parser.add_argument('--test-batch', type=int, default=256)
-        parser.add_argument('--lr', type=float, default=2e-4)
+        parser.add_argument('--lr', type=float, default=1e-3)
         parser.add_argument('--file', type=str, default='./acc_result/acc_mnist')
         parser.add_argument('--clip', type=float, default=1.0)
         parser.add_argument('--batch', type=int, default=64)
@@ -338,14 +343,14 @@ try:
             ),
         )
 
-        if (args.noise > 0):
-            G = GeneratorDCGAN_cifar(z_dim=args.g_dim)
+        if (args.noise >= 0):
+            G = GeneratorDCGAN_cifar(z_dim=args.g_dim).cuda()
             G.train()
 
             D = DiscriminatorDCGAN_cifar()
             D.train()
 
-            G = convert_batchnorm_modules(G).cuda()
+            #G = convert_batchnorm_modules(G)
             D = convert_batchnorm_modules(D).cuda()
 
             optimizerD = optim.Adam(D.parameters(), lr=args.lr, betas=(0.5, 0.999))
@@ -360,7 +365,7 @@ try:
             )
             privacy_engine.attach(optimizerD)
 
-
+            '''
             def compute_epsilon(steps,nm):
                 orders = [1 + x / 10. for x in range(1, 100)] + list(range(12, 64))
                 sampling_probability = args.batch/len(train_set)
@@ -373,42 +378,48 @@ try:
 
             eps = compute_epsilon(args.iter,args.noise)
             print(eps)
+            '''
 
             criterion = nn.BCELoss()
             bar = tqdm(range(args.iter+1))
             for iteration in bar:
-                img, label = next(iter(train_loader)) 
-                optimizerD.zero_grad()
-                optimizerG.zero_grad()
+                for i in range(2):
+                    img, label = next(iter(train_loader)) 
+                    optimizerD.zero_grad()
+                    optimizerG.zero_grad()
 
-                batch_size = img.size()[0]
-                valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
-                fake  = Variable(FloatTensor(batch_size, 1).fill_(0.0), requires_grad=False)
+                    batch_size = img.size()[0]
+                    valid = Variable(FloatTensor(batch_size).fill_(1.0), requires_grad=False)
+                    fake  = Variable(FloatTensor(batch_size).fill_(0.0), requires_grad=False)
 
-                r_img = Variable(img.type(FloatTensor))
-                label = Variable(label.type(LongTensor))
+                    r_img = Variable(img.type(FloatTensor))
+                    label = Variable(label.type(LongTensor))
 
-                noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
-                gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
+                    noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
+                    gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
 
+
+                    r_logit = D(r_img, label).view(-1, 1).squeeze(1)
+                    r_loss_D = criterion(r_logit, valid)
+
+                    gen_img = G(noise.detach(), gen_label)
+                    f_logit = D(gen_img, gen_label).view(-1, 1).squeeze(1)
+                    f_loss_D = criterion(f_logit, fake)
+                    loss_D = (r_loss_D + f_loss_D) / 2
+
+                    loss_D.backward()
+                    optimizerD.step()
                 
-                r_logit = D(r_img, label)
-                r_loss_D = criterion(r_logit, valid)
+                for i in range(3):
+                    noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
+                    gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
+                    
+                    gen_img = G(noise, gen_label)
+                    f_logit = D(gen_img, gen_label).view(-1, 1).squeeze(1)
+                    loss_G = criterion(f_logit, valid)
 
-                gen_img = G(noise, gen_label)
-                f_logit = D(gen_img, gen_label)
-                f_loss_D = criterion(f_logit, fake)
-                loss_D = (r_loss_D + f_loss_D) / 2
-
-                loss_D.backward()
-                optimizerD.step()	
-
-                gen_img = G(noise, gen_label)
-                f_logit = D(gen_img, gen_label)
-                loss_G = criterion(f_logit, valid)
-
-                loss_G.backward()
-                optimizerG.step()
+                    loss_G.backward()
+                    optimizerG.step()
 
                 bar.set_description(f"Epoch [{iteration+1}/{args.iter}] d_loss: {loss_D.item():.5f} g_loss: {loss_G.item():.5f}")
                 if((iteration+1) %1000 == 0):
@@ -417,7 +428,7 @@ try:
                     if not os.path.isdir(save_dir):
                         os.mkdir(save_dir)
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
-                    generate_image_cifar(iteration+1, G, fix_noise, save_dir)
+                    generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
                     torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
 
                 if((iteration+1) %args.iter == 0):
@@ -426,6 +437,7 @@ try:
 
 except:
     raise
+
 
 
 
