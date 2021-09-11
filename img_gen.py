@@ -49,6 +49,39 @@ class Generator(nn.Module):
         data = torch.cat((linear, labels), axis=1)
         return self.model(data)
 
+def one_hot_embedding(y, num_classes=10, dtype=torch.cuda.FloatTensor):
+    '''
+    apply one hot encoding on labels
+    :param y: class label
+    :param num_classes: number of classes
+    :param dtype: data type
+    :return:
+    '''
+    scatter_dim = len(y.size())
+    y_tensor = y.type(torch.cuda.LongTensor).view(*y.size(), -1)
+    zeros = torch.zeros(*y.size(), num_classes).type(dtype)
+    return zeros.scatter(scatter_dim, y_tensor, 1)
+
+
+def pixel_norm(x, eps=1e-10):
+    '''
+    Pixel normalization
+    :param x:
+    :param eps:
+    :return:
+    '''
+    return x * torch.rsqrt(torch.mean(torch.pow(x, 2), dim=1, keepdim=True) + eps)
+
+
+def l2_norm(v, eps=1e-10):
+    '''
+    L2 normalization
+    :param v:
+    :param eps:
+    :return:
+    '''
+    return v / (v.norm() + eps)
+
 class GeneratorDCGAN_cifar(nn.Module):
     def __init__(self, z_dim=10, model_dim=64, num_classes=10, outact=nn.Tanh()):
         super(GeneratorDCGAN_cifar, self).__init__()
@@ -152,8 +185,8 @@ if __name__ == '__main__':
 	if args.dataset == 'mnist':
 		netG = Generator(args.g_dim).cuda()
 	elif args.dataset == 'cifar_10':
-		netG = GeneratorDCGAN_cifar(z_dim=args.g_dim)
-		netG = convert_batchnorm_modules(netG).cuda()
+		netG = GeneratorDCGAN_cifar(z_dim=args.g_dim).cuda()
+#		netG = convert_batchnorm_modules(netG).cuda()
 	netG.load_state_dict(torch.load(args.model_path))
 
 	print(f"save dir:{args.save_dir}")

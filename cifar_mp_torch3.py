@@ -17,6 +17,8 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from torchvision import transforms
 from torchvision.datasets import CIFAR10, MNIST
+import torch.nn.utils.prune as prune
+import torch.nn.functional as F
 
 import pyvacy
 from pyvacy import optim, analysis, sampling
@@ -365,6 +367,15 @@ try:
             )
             privacy_engine.attach(optimizerD)
 
+            prune.random_unstructured(D.linear, name="weight", amount=0.5)
+            prune.random_unstructured(D.linear_y, name="weight", amount=0.5)
+            prune.random_unstructured(D.conv1, name="weight", amount=0.5)
+            prune.random_unstructured(D.conv2, name="weight", amount=0.5)
+            prune.random_unstructured(D.conv3, name="weight", amount=0.5)
+
+            for n, p in D.named_parameters():
+                if n in ['linear.weight_orig', 'linear_y.weight_orig', 'conv1.weight_orig', 'conv2.weight_orig', 'conv3.weight_orig']:
+                    p.requires_grad = False
             '''
             def compute_epsilon(steps,nm):
                 orders = [1 + x / 10. for x in range(1, 100)] + list(range(12, 64))
@@ -392,8 +403,8 @@ try:
                     valid = Variable(FloatTensor(batch_size).fill_(1.0), requires_grad=False)
                     fake  = Variable(FloatTensor(batch_size).fill_(0.0), requires_grad=False)
 
-                    r_img = Variable(img.type(FloatTensor))
-                    label = Variable(label.type(LongTensor))
+                    r_img = Variable(img.float().cuda())
+                    label = Variable(label.long().cuda())
 
                     noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
                     gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
@@ -430,8 +441,21 @@ try:
                         os.mkdir(save_dir)
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
-                    torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
 
+                    prune.remove(D.linear, name="weight")
+                    prune.remove(D.linear_y, name="weight")
+                    prune.remove(D.conv1, name="weight")
+                    prune.remove(D.conv2, name="weight",)
+                    prune.remove(D.conv3, name="weight")
+
+                    torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
+
+                    prune.random_unstructured(D.linear, name="weight", amount=0.5)
+                    prune.random_unstructured(D.linear_y, name="weight", amount=0.5)
+                    prune.random_unstructured(D.conv1, name="weight", amount=0.5)
+                    prune.random_unstructured(D.conv2, name="weight", amount=0.5)
+                    prune.random_unstructured(D.conv3, name="weight", amount=0.5)
                 if((iteration+1) %args.iter == 0):
                     break
 

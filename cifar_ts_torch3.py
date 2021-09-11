@@ -44,6 +44,17 @@ def same_seeds(seed):
 
 same_seeds(0)
 
+class TemperedSigmoid(nn.Module):
+    def __init__(self, s=2, T=2, o=1):
+        super().__init__()
+        self.s = s
+        self.T = T
+        self.o = o
+
+    def forward(self, input):
+        div = 1 + torch.exp(-1 * self.T *input)
+        return self.s / div - self.o
+
 
 def one_hot_embedding(y, num_classes=10, dtype=torch.cuda.FloatTensor):
     '''
@@ -194,22 +205,22 @@ class GeneratorDCGAN_cifar(nn.Module):
         z_in = torch.cat([z, y_onehot], dim=1)
         output = self.fc(z_in)
         output = output.view(-1, self.z_dim, 1, 1)
-        output = self.relu(output)
+        output = TemperedSigmoid()(output)
         output = pixel_norm(output)
 
         output = self.deconv1(output)
         output = self.BN_1(output)
-        output = self.relu(output)
+        output = TemperedSigmoid()(output)
         output = pixel_norm(output)
 
         output = self.deconv2(output)
         output = self.BN_2(output)
-        output = self.relu(output)
+        output = TemperedSigmoid()(output)
         output = pixel_norm(output)
 
         output = self.deconv3(output)
         output = self.BN_3(output)
-        output = self.relu(output)
+        output = TemperedSigmoid()(output)
         output = pixel_norm(output)
 
         output = self.deconv4(output)
@@ -269,9 +280,9 @@ class DiscriminatorDCGAN_cifar(nn.Module):
 
     def forward(self, input, y):
         input = input.view(-1, 1, 32, 32)
-        h = self.LeakyReLU(self.conv1(input))
-        h = self.LeakyReLU(self.BN_1(self.conv2(h)))
-        h = self.LeakyReLU(self.BN_2(self.conv3(h)))
+        h = TemperedSigmoid()(self.conv1(input))
+        h = TemperedSigmoid()(self.BN_1(self.conv2(h)))
+        h = TemperedSigmoid()(self.BN_2(self.conv3(h)))
         #h = self.Sigmoid(self.conv4(h))
         h = h.view(-1, 4 * 4 * 4 * self.model_dim)
         out = self.linear(h)
@@ -411,7 +422,7 @@ try:
                     optimizerD.step()
                 iteration = iteration + 1
                 
-                for i in range(3):
+                for i in range(1):
                     noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
                     gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
                     
@@ -431,6 +442,7 @@ try:
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
                     torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
 
                 if((iteration+1) %args.iter == 0):
                     break
@@ -438,7 +450,6 @@ try:
 
 except:
     raise
-
 
 
 

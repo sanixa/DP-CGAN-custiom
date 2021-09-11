@@ -312,7 +312,30 @@ def generate_image_cifar(iter, netG, fix_noise, save_dir, num_classes=10,
     del label, noise, sample
     torch.cuda.empty_cache()
 
+def Laplacian_smoothing(net, sigma=1):
+    ## after add dp noise
+    for p_net in net.parameters():
+        size_param = torch.numel(p_net)
+        if size_param < 3:
+            pass
+        else:
+           tmp = p_net.grad.view(-1, size_param)
 
+           c = np.zeros(shape=(1, size_param))
+           c[0, 0] = -2.; c[0, 1] = 1.; c[0, -1] = 1.
+           c = torch.Tensor(c).cuda()
+           zero_N = torch.zeros(1, size_param).cuda()
+           c_fft = torch.rfft(c, 1, onesided=False)
+           coeff = 1./(1.-sigma*c_fft[...,0])
+           ft_tmp = torch.rfft(tmp, 1, onesided=False)
+           tmp = torch.zeros_like(ft_tmp)
+           tmp[...,0] = ft_tmp[...,0]*coeff
+           tmp[...,1] = ft_tmp[...,1]*coeff
+           tmp = torch.irfft(tmp, 1, onesided=False)
+           tmp = tmp.view(p_net.grad.size())
+           p_net.grad.data = tmp
+
+    return net
 
 try:
     if __name__ == '__main__':
@@ -408,6 +431,7 @@ try:
                     loss_D = (r_loss_D + f_loss_D) / 2
 
                     loss_D.backward()
+                    D = Laplacian_smoothing(D)
                     optimizerD.step()
                 iteration = iteration + 1
                 
@@ -431,6 +455,7 @@ try:
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
                     torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
 
                 if((iteration+1) %args.iter == 0):
                     break
@@ -438,7 +463,6 @@ try:
 
 except:
     raise
-
 
 
 

@@ -221,6 +221,9 @@ class GeneratorDCGAN_cifar(nn.Module):
 class DiscriminatorDCGAN_cifar(nn.Module):
     def __init__(self, model_dim=64, num_classes=10, if_SN=False):
         super(DiscriminatorDCGAN_cifar, self).__init__()
+        self.cdist = nn.CosineSimilarity(dim = 1, eps= 1e-9)
+        self.grads = []
+        self.grad_dict = {}
 
         self.model_dim = model_dim
         self.num_classes = num_classes
@@ -312,7 +315,55 @@ def generate_image_cifar(iter, netG, fix_noise, save_dir, num_classes=10,
     del label, noise, sample
     torch.cuda.empty_cache()
 
+def collect(args, collect_iter, G, D, train_loader, optimizerD, optimizerG, D_grad_dict_num):
 
+    criterion = nn.BCELoss()
+    bar = tqdm(range(args.iter+1))
+    for iteration in bar:
+        img, label = next(iter(train_loader)) 
+        optimizerD.zero_grad()
+        optimizerG.zero_grad()
+
+        batch_size = img.size()[0]
+
+        valid = Variable(FloatTensor(batch_size, 1).fill_(1.0), requires_grad=False)
+        fake  = Variable(FloatTensor(batch_size, 1).fill_(0.0), requires_grad=False)
+
+        r_img = Variable(img.type(FloatTensor))
+        label = Variable(label.type(LongTensor))
+
+        noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
+        gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
+
+        
+        r_logit = D(r_img, label)
+        r_loss_D = criterion(r_logit, valid)
+
+        gen_img = G(noise, gen_label)
+        f_logit = D(gen_img, gen_label)
+        f_loss_D = criterion(f_logit, fake)
+        loss_D = (r_loss_D + f_loss_D) / 2
+
+        loss_D.backward()
+        optimizerD.step()	
+
+        gen_img = G(noise, gen_label)
+        f_logit = D(gen_img, gen_label)
+        loss_G = criterion(f_logit, valid)
+
+        loss_G.backward()
+        optimizerG.step()
+        bar.set_description(f"Epoch [{iteration+1}/{args.iter}] d_loss: {loss_D.item():.5f} g_loss: {loss_G.item():.5f}")
+
+        if torch.rand(1) < 0.2:
+            D.grad_dict[D_grad_dict_num] = [p.grad.clone() for p in D.parameters()]
+            g_vec = torch.cat([g.view(-1) for g in D.grad_dict[D_grad_dict_num]])
+            D.grads.append(g_vec)
+            D_grad_dict_num += 1
+
+        if iteration >= collect_iter:
+            break
+    return D_grad_dict_num
 
 try:
     if __name__ == '__main__':
@@ -329,6 +380,7 @@ try:
         parser.add_argument('--noise', type=float, default=0.11145)
         parser.add_argument('--delta', type=float, default=1e-5)
         parser.add_argument('--exp_name', type=str)
+        parser.add_argument('--collect-iter', type=int, default=1000)
         args = parser.parse_args()
 
 
@@ -365,6 +417,11 @@ try:
             )
             privacy_engine.attach(optimizerD)
 
+            D_grad_dict_num = 0
+            collect_iter = args.collect_iter
+            D_grad_dict_num = collect(args, collect_iter, G, D, train_loader, optimizerG, optimizerD, D_grad_dict_num)
+            D.grads = torch.stack(D.grads)
+            print("finish collecting")
             '''
             def compute_epsilon(steps,nm):
                 orders = [1 + x / 10. for x in range(1, 100)] + list(range(12, 64))
@@ -408,6 +465,14 @@ try:
                     loss_D = (r_loss_D + f_loss_D) / 2
 
                     loss_D.backward()
+
+                    g_vec = torch.cat([p.grad.view(-1) for p in D.parameters()])
+                    dist_mat = D.cdist(g_vec.unsqueeze(0), D.grads)
+                    #import ipdb; ipdb.set_trace()
+                    closest_idx = int(dist_mat.argmax().data.cpu().numpy())
+                        
+                    for idx, p in enumerate(D.parameters()):
+                        p.grad = D.grad_dict[closest_idx][idx]
                     optimizerD.step()
                 iteration = iteration + 1
                 
@@ -431,6 +496,7 @@ try:
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
                     torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
 
                 if((iteration+1) %args.iter == 0):
                     break
