@@ -448,8 +448,12 @@ try:
                     prune.remove(D.conv2, name="weight",)
                     prune.remove(D.conv3, name="weight")
 
-                    torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
-                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
+                    G.eval()
+                    D.eval()
+                    torch.save(G.state_dict(), f"./checkpoint/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
+                    G.train()
+                    D.train()
 
                     prune.random_unstructured(D.linear, name="weight", amount=0.5)
                     prune.random_unstructured(D.linear_y, name="weight", amount=0.5)

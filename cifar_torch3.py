@@ -431,6 +431,7 @@ try:
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
                     torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
 
                 if((iteration+1) %args.iter == 0):
                     break
@@ -438,6 +439,7 @@ try:
 
 except:
     raise
+
 
 
 

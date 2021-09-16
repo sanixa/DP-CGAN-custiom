@@ -1,10 +1,27 @@
-for i in {1..5}
-do
-	python img_gen.py --model-path checkpoint/eps_10/DPCGAN_MNIST_eps10.0_acc0.${i}.ckpt --save-dir data/eps_10/diff_acc/${i}0 --dataset mnist
-done
+# +
 
-for i in 1000 2000 3000 4000 5000 6000 7000 8000 9000 10000 11000 12000 13000 14000 15000 16000 17000 18000 19000 20000
-do
-	python img_gen.py --model-path checkpoint/eps_10/DPCGAN_MNIST_eps10.0_iteration${i}.ckpt --save-dir data/eps_10/diff_iter/${i} --dataset mnist
-done
+if [[ "$1" == "cifar" ]]
+then
 
+	for i in ge lap mp ts
+	do
+		for j in 1000 5000 10000 20000
+		do
+			python img_gen.py --dataset cifar_10 --g_dim 100 --model-path checkpoint_cifar/eps_10_${i}_z100/iteration${j}.ckpt --save-dir data_cifar/eps_10_${i}/diff_iter/${j}
+		done
+	done
+    
+# -
+
+else
+
+
+	for i in ge lap mp ts
+	do
+		for j in 1000 5000 10000 20000
+		do
+			python img_gen.py --g_dim 32 --dataset mnist --model-path checkpoint/eps_10_${i}_z32/iteration${j}.ckpt --save-dir data/eps_10_${i}/diff_iter/${j}
+		done
+	done
+
+fi

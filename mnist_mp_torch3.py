@@ -124,7 +124,7 @@ class Generator(nn.Module):
     def __init__(self, z_dim):
         super(Generator, self).__init__()
         self.z_dim = z_dim
-        '''
+        
         self.label_emb = nn.Sequential(
             nn.Embedding(10, 50),
             nn.Linear(50, 49),
@@ -132,7 +132,7 @@ class Generator(nn.Module):
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(100, 7*7*128),
+            nn.Linear(self.z_dim, 7*7*128),
             nn.LeakyReLU(),
             Unflatten_7(),
         )
@@ -145,44 +145,12 @@ class Generator(nn.Module):
             nn.Conv2d(128, 1, 7, 1, 3),
             nn.Tanh(),
         )
-        '''
-        self.unflatten_7 = Unflatten_7()
-        self.emb = nn.Embedding(10, 50)
-        self.linear_1 = nn.Linear(50, 49)
-
-        self.linear_2 = nn.Linear(self.z_dim, 7*7*128)
-
-        self.conv_tran_1 = nn.ConvTranspose2d(129, 128, 4, 2, 1)
-        self.conv_tran_2 = nn.ConvTranspose2d(128, 128, 4, 2, 1)
-        self.conv = nn.Conv2d(128, 1, 7, 1, 3)
-
         self.apply(weights_init)
 
     def forward(self, z, labels):
-        '''
         labels, linear = self.label_emb(labels), self.linear(z)
         data = torch.cat((linear, labels), axis=1)
         return self.model(data)
-        '''
-
-        labels = self.emb(labels)
-        labels = self.linear_1(labels)
-        labels = self.unflatten_7(labels)
-
-        linear = self.linear_2(z)
-        linear = nn.LeakyReLU()(linear)
-        linear = self.unflatten_7(linear)
-
-        data = torch.cat((linear, labels), axis=1)
-        data = self.conv_tran_1(data)
-        data = nn.LeakyReLU()(data)
-        data = self.conv_tran_2(data)
-        data = nn.LeakyReLU()(data)
-        data = self.conv(data)
-        data = nn.Tanh()(data)
-
-        return data
-
 
 FloatTensor = torch.cuda.FloatTensor
 LongTensor = torch.cuda.LongTensor

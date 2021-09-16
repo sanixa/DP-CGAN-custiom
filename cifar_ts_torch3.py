@@ -205,22 +205,22 @@ class GeneratorDCGAN_cifar(nn.Module):
         z_in = torch.cat([z, y_onehot], dim=1)
         output = self.fc(z_in)
         output = output.view(-1, self.z_dim, 1, 1)
-        output = TemperedSigmoid()(output)
+        output = self.relu(output)
         output = pixel_norm(output)
 
         output = self.deconv1(output)
         output = self.BN_1(output)
-        output = TemperedSigmoid()(output)
+        output = self.relu(output)
         output = pixel_norm(output)
 
         output = self.deconv2(output)
         output = self.BN_2(output)
-        output = TemperedSigmoid()(output)
+        output = self.relu(output)
         output = pixel_norm(output)
 
         output = self.deconv3(output)
         output = self.BN_3(output)
-        output = TemperedSigmoid()(output)
+        output = self.relu(output)
         output = pixel_norm(output)
 
         output = self.deconv4(output)
@@ -441,8 +441,12 @@ try:
                         os.mkdir(save_dir)
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
-                    torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
-                    torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
+                    G.eval()
+                    D.eval()
+                    torch.save(G.state_dict(), f"./checkpoint/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
+                    G.train()
+                    D.train()
 
                 if((iteration+1) %args.iter == 0):
                     break

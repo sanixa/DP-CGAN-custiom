@@ -249,12 +249,13 @@ try:
                 loss_D.backward()
                 optimizerD.step()	
 
-                gen_img = G(noise, gen_label)
-                f_logit = D(gen_img, gen_label)
-                loss_G = criterion(f_logit, valid)
+                for i in range(2):
+                    gen_img = G(noise, gen_label)
+                    f_logit = D(gen_img, gen_label)
+                    loss_G = criterion(f_logit, valid)
 
-                loss_G.backward()
-                optimizerG.step()
+                    loss_G.backward()
+                    optimizerG.step()
                 		
                 bar.set_description(f"Epoch [{iteration+1}/{args.iter}] d_loss: {loss_D.item():.5f} g_loss: {loss_G.item():.5f}")
                 if((iteration+1) %1000 == 0):
@@ -265,12 +266,14 @@ try:
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_mnist(iteration+1, G, fix_noise, save_dir)
                     torch.save(G.state_dict(), f"./checkpoint/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
+                    torch.save(D.state_dict(), f"./checkpoint/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
                 
                 if((iteration+1) %args.iter == 0):
                     break
 
 except:
     raise
+
 
 
 
