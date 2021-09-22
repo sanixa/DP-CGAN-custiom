@@ -321,13 +321,14 @@ try:
         parser.add_argument('--class_epoch', type=int, default=20)
         parser.add_argument('--g_dim', type=int, default=100)
         parser.add_argument('--test-batch', type=int, default=256)
-        parser.add_argument('--lr', type=float, default=1e-3)
+        parser.add_argument('--lr', type=float, default=0.0002)
         parser.add_argument('--file', type=str, default='./acc_result/acc_mnist')
         parser.add_argument('--clip', type=float, default=1.0)
         parser.add_argument('--batch', type=int, default=64)
         parser.add_argument('--iter', type=int, default=20000)
         parser.add_argument('--noise', type=float, default=0.11145)
         parser.add_argument('--delta', type=float, default=1e-5)
+        parser.add_argument('--update-train-dataset', type=int, default=0)
         parser.add_argument('--exp_name', type=str)
         args = parser.parse_args()
 
@@ -336,6 +337,16 @@ try:
                             transforms.Grayscale(1),
                             transforms.ToTensor()])
         train_set = CIFAR10(root="CIFAR10", download=True, train=True, transform=transform)
+        
+        ###fix sub-training set (fix to 10000 training samples)
+        if args.update_train_dataset:
+            indices_full = np.arange(50000)
+            np.random.shuffle(indices_full)
+            indices_slice = indices_full[:600]
+            np.savetxt('index_600.txt', indices_slice, fmt='%i')
+        indices = np.loadtxt('index_600.txt', dtype=np.int_)
+        train_set = torch.utils.data.Subset(train_set, indices)
+        
         train_loader = DataLoader(train_set, 
                 batch_sampler=UniformWithReplacementSampler(
                     num_samples=len(train_set),
@@ -383,7 +394,7 @@ try:
             criterion = nn.BCELoss()
             bar = tqdm(range(args.iter+1))
             for iteration in bar:
-                for i in range(2):
+                for i in range(1):
                     img, label = next(iter(train_loader)) 
                     optimizerD.zero_grad()
                     optimizerG.zero_grad()
@@ -409,9 +420,9 @@ try:
 
                     loss_D.backward()
                     optimizerD.step()
-                iteration = iteration + 1
+                #iteration = iteration + 1
                 
-                for i in range(3):
+                for i in range(10):
                     noise = Variable(FloatTensor(np.random.normal(0, 1, (batch_size, args.g_dim))))
                     gen_label = Variable(LongTensor(np.random.randint(0, args.classes, batch_size)))
                     
@@ -430,8 +441,13 @@ try:
                         os.mkdir(save_dir)
                     fix_noise = FloatTensor(np.random.normal(0, 1, (10, args.g_dim)))
                     generate_image_cifar(iteration+1, G, fix_noise.detach(), save_dir)
+
+                    #G.eval()
+                    #D.eval()
                     torch.save(G.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/iteration{(iteration+1)}.ckpt")
                     torch.save(D.state_dict(), f"./checkpoint_cifar/"+args.exp_name+f"/D_iteration{(iteration+1)}.ckpt")
+                    #G.train()
+                    #D.train()
 
                 if((iteration+1) %args.iter == 0):
                     break
