@@ -42,7 +42,15 @@ def same_seeds(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-same_seeds(0)
+
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find("BatchNorm") != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0)
 
 
 def one_hot_embedding(y, num_classes=10, dtype=torch.cuda.FloatTensor):
@@ -331,6 +339,7 @@ try:
         parser.add_argument('--exp_name', type=str)
         args = parser.parse_args()
 
+        same_seeds(np.random.randint(10000, size=1)[0])
 
         transform = transforms.Compose([
                             transforms.Grayscale(1),
@@ -349,7 +358,8 @@ try:
 
             D = DiscriminatorDCGAN_cifar()
             D.train()
-
+            D.apply(weights_init)
+            
             #G = convert_batchnorm_modules(G)
             D = convert_batchnorm_modules(D).cuda()
 
@@ -439,6 +449,7 @@ try:
 
 except:
     raise
+
 
 
 

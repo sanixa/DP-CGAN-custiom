@@ -20,6 +20,7 @@ CIFAR10/*
 *.txt
 *.npy
 *.npz
+*.gz
 source/train/*
 source/checkpoint/*
 
